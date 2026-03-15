@@ -20,7 +20,8 @@ type AccountsContextType = {
   addAccount: (
     issuer: string,
     account: string,
-    secret?: string,
+    secretOrPublicKey?: string,
+    isPublicKey?: boolean,
   ) => Promise<void>;
   deleteAccount: (id: string) => Promise<void>;
   clearAllAccounts: () => Promise<void>;
@@ -65,9 +66,19 @@ export function AccountsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addAccount = useCallback(
-    async (issuer: string, account: string, secret?: string) => {
+    async (
+      issuer: string,
+      account: string,
+      secretOrPublicKey?: string,
+      isPublicKey: boolean = false,
+    ) => {
       try {
-        const newAccount = await addAccountToStorage(issuer, account, secret);
+        const newAccount = await addAccountToStorage(
+          issuer,
+          account,
+          secretOrPublicKey,
+          isPublicKey,
+        );
         setAccounts((prev) => [...prev, newAccount]);
       } catch (error) {
         console.error("Failed to add account:", error);

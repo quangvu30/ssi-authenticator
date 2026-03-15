@@ -1,3 +1,5 @@
+import { KeyInfoDisplay } from "@/components/key-info-display";
+import { SharePublicKeyButton } from "@/components/share-public-key";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Colors } from "@/constants/theme";
@@ -160,6 +162,12 @@ export default function SettingsScreen() {
             }
             showChevron
           />
+        </SettingSection>
+
+        <SettingSection title="CRYPTOGRAPHIC KEYS">
+          <KeyInfoDisplay />
+          <View style={styles.divider} />
+          <SharePublicKeyButton />
         </SettingSection>
 
         <SettingSection title="DATA">

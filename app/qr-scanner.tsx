@@ -67,7 +67,42 @@ export default function QRScannerScreen() {
     setScanned(true);
 
     try {
-      // Parse otpauth:// URL format
+      // Check if it's an ECDH public key format (base64 encoded, starts with specific prefix)
+      // Format: ecdh://publickey?issuer=ServiceName&account=user@example.com
+      if (data.startsWith("ecdh://")) {
+        const url = new URL(data);
+        let publicKey = url.hostname; // The public key is the hostname part
+        const params = new URLSearchParams(url.search);
+
+        // Convert from URL-safe base64 back to regular base64
+        publicKey = publicKey.replace(/-/g, "+").replace(/_/g, "/");
+        // Add padding if needed
+        while (publicKey.length % 4 !== 0) {
+          publicKey += "=";
+        }
+
+        const issuer = params.get("issuer") || "Unknown Service";
+        const account = params.get("account") || "Unknown Account";
+
+        // Save the account with ECDH public key
+        await addAccount(issuer, account, publicKey, true);
+
+        Alert.alert(
+          "Account Added",
+          `${issuer}\n${account}\n\nUsing ECDH Key Exchange`,
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                router.back();
+              },
+            },
+          ],
+        );
+        return;
+      }
+
+      // Parse traditional otpauth:// URL format
       // Example: otpauth://totp/Google:user@gmail.com?secret=JBSWY3DPEHPK3PXP&issuer=Google
       const url = new URL(data);
 
@@ -87,8 +122,8 @@ export default function QRScannerScreen() {
         throw new Error("No secret found in QR code");
       }
 
-      // Save the account to storage
-      await addAccount(issuer, account, secret);
+      // Save the account to storage (legacy format)
+      await addAccount(issuer, account, secret, false);
 
       Alert.alert("Account Added", `${issuer}\n${account}`, [
         {
@@ -101,7 +136,7 @@ export default function QRScannerScreen() {
     } catch (error) {
       Alert.alert(
         "Invalid QR Code",
-        "The scanned QR code is not a valid authenticator code.",
+        "The scanned QR code is not a valid authenticator code or ECDH public key.",
         [
           {
             text: "Try Again",
@@ -153,6 +188,9 @@ export default function QRScannerScreen() {
           <View style={styles.overlayBottom}>
             <ThemedText style={styles.instruction}>
               Position the QR code within the frame
+            </ThemedText>
+            <ThemedText style={styles.instructionSubtext}>
+              Supports both ECDH public keys and traditional TOTP secrets
             </ThemedText>
           </View>
         </View>
@@ -256,6 +294,14 @@ const styles = StyleSheet.create({
     color: "#fff",
     textAlign: "center",
     paddingHorizontal: 20,
+  },
+  instructionSubtext: {
+    fontSize: 12,
+    color: "#fff",
+    textAlign: "center",
+    paddingHorizontal: 20,
+    marginTop: 8,
+    opacity: 0.7,
   },
   permissionContainer: {
     flex: 1,

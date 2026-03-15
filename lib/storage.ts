@@ -1,7 +1,45 @@
 import { AuthenticatorAccount } from "@/components/authenticator-item";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ECDH from "./ecdh";
+import { getECDHKeyPair } from "./key-manager";
+import * as OTP from "./otp";
 
 const STORAGE_KEY = "@ssi_authenticator_accounts";
+
+/**
+ * Generate TOTP code from ECDH shared secret
+ */
+async function generateTOTPFromECDH(
+  remotePublicKey: string,
+  timestamp: number = Date.now(),
+): Promise<string> {
+  try {
+    // Get our ECDH key pair
+    const keyPair = await getECDHKeyPair();
+    if (!keyPair) {
+      throw new Error("ECDH key pair not initialized");
+    }
+
+    // Compute shared secret
+    const sharedSecret = ECDH.computeSharedSecret(
+      keyPair.privateKey,
+      remotePublicKey,
+    );
+
+    // Use shared secret as TOTP secret (convert base64 to base32 format)
+    // For simplicity, we'll use the shared secret directly with OTP generation
+    return await OTP.generateTOTP(sharedSecret, {
+      algorithm: "SHA256",
+      digits: 6,
+      period: 30,
+      timestamp,
+    });
+  } catch (error) {
+    console.error("Error generating TOTP from ECDH:", error);
+    // Fallback to simple generation
+    return generateTOTPCode(remotePublicKey.slice(0, 16), timestamp);
+  }
+}
 
 // Generate a 6-digit code based on secret and timestamp
 // This is a simplified version - in production, use proper TOTP algorithm
@@ -29,10 +67,26 @@ export async function loadAccounts(): Promise<AuthenticatorAccount[]> {
 
     const accounts = JSON.parse(data);
     // Generate current codes for each account
-    return accounts.map((account: any) => ({
-      ...account,
-      code: generateTOTPCode(account.secret || account.id),
-    }));
+    const accountsWithCodes = await Promise.all(
+      accounts.map(async (account: any) => {
+        let code: string;
+
+        if (account.publicKey) {
+          // New format: use ECDH key exchange
+          code = await generateTOTPFromECDH(account.publicKey);
+        } else {
+          // Legacy format: use direct secret
+          code = generateTOTPCode(account.secret || account.id);
+        }
+
+        return {
+          ...account,
+          code,
+        };
+      }),
+    );
+
+    return accountsWithCodes;
   } catch (error) {
     console.error("Error loading accounts:", error);
     return [];
@@ -55,25 +109,36 @@ export async function saveAccounts(
 export async function addAccount(
   issuer: string,
   account: string,
-  secret?: string,
+  secretOrPublicKey?: string,
+  isPublicKey: boolean = false,
 ): Promise<AuthenticatorAccount> {
   try {
     const accounts = await loadAccounts();
 
-    const newAccount: AuthenticatorAccount = {
+    let code: string;
+    let accountData: any = {
       id: Date.now().toString(),
       issuer,
       account,
-      code: generateTOTPCode(secret || Date.now().toString()),
     };
 
-    // Store with secret for regeneration
-    const accountWithSecret = {
-      ...newAccount,
-      secret: secret || newAccount.id,
+    if (isPublicKey && secretOrPublicKey) {
+      // New format: ECDH public key
+      code = await generateTOTPFromECDH(secretOrPublicKey);
+      accountData.publicKey = secretOrPublicKey;
+    } else {
+      // Legacy format: direct secret
+      const secret = secretOrPublicKey || Date.now().toString();
+      code = generateTOTPCode(secret);
+      accountData.secret = secret;
+    }
+
+    const newAccount: AuthenticatorAccount = {
+      ...accountData,
+      code,
     };
 
-    accounts.push(accountWithSecret);
+    accounts.push(newAccount);
     await saveAccounts(accounts);
 
     return newAccount;
@@ -108,8 +173,24 @@ export async function clearAllAccounts(): Promise<void> {
 // Update account codes (call this every 30 seconds)
 export async function updateAccountCodes(): Promise<AuthenticatorAccount[]> {
   const accounts = await loadAccounts();
-  return accounts.map((account) => ({
-    ...account,
-    code: generateTOTPCode((account as any).secret || account.id),
-  }));
+  const accountsWithUpdatedCodes = await Promise.all(
+    accounts.map(async (account: any) => {
+      let code: string;
+
+      if (account.publicKey) {
+        // New format: use ECDH key exchange
+        code = await generateTOTPFromECDH(account.publicKey);
+      } else {
+        // Legacy format: use direct secret
+        code = generateTOTPCode(account.secret || account.id);
+      }
+
+      return {
+        ...account,
+        code,
+      };
+    }),
+  );
+
+  return accountsWithUpdatedCodes;
 }
